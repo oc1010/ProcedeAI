@@ -1,0 +1,8 @@
+streamlit
+groq
+docxtpl
+pypdf
+pandas
+openpyxl
+st-gsheets-connection
+streamlit-authenticator
