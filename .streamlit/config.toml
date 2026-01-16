@@ -1,0 +1,7 @@
+[theme]
+base = "light"
+primaryColor = "#0f2e52"        # Your "ArbOS Navy Blue"
+backgroundColor = "#ffffff"     # Pure White
+secondaryBackgroundColor = "#f0f2f6" # Light Grey for Sidebar
+textColor = "#262730"           # Dark Grey for text
+font = "sans serif"
