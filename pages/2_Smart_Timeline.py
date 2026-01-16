@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 # 1. CONFIGURATION
 st.set_page_config(page_title="ArbOS: Smart Timeline", layout="wide")
 
-# Security Gatekeeper
 if 'user_role' not in st.session_state or st.session_state['user_role'] is None:
     st.error("⛔ ACCESS DENIED: Please log in first.")
     st.stop()
@@ -21,184 +20,182 @@ def get_submissions():
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
         df = conn.read(worksheet="Submissions", ttl=0)
-        # Ensure columns exist if sheet is new
-        if df.empty or 'party' not in df.columns:
-            return pd.DataFrame(columns=['party', 'doc_type', 'summary', 'proposed_date', 'status'])
+        expected_cols = ['party', 'doc_type', 'summary', 'proposed_date', 'status', 'target_event']
+        # Add missing cols if they don't exist yet
+        for col in expected_cols:
+            if col not in df.columns:
+                df[col] = ""
         return df
     except:
-        return pd.DataFrame(columns=['party', 'doc_type', 'summary', 'proposed_date', 'status'])
+        return pd.DataFrame(columns=['party', 'doc_type', 'summary', 'proposed_date', 'status', 'target_event'])
 
-def add_submission(party, doc_type, summary, proposed_date):
+def add_submission(party, doc_type, summary, proposed_date, target_event):
     conn = st.connection("gsheets", type=GSheetsConnection)
-    try:
-        df = conn.read(worksheet="Submissions", ttl=0)
-    except:
-        df = pd.DataFrame(columns=['party', 'doc_type', 'summary', 'proposed_date', 'status'])
-        
+    df = get_submissions()
+    
     new_row = pd.DataFrame([{
         "party": party,
         "doc_type": doc_type,
         "summary": summary,
         "proposed_date": proposed_date,
-        "status": "Pending"
+        "status": "Pending",
+        "target_event": target_event
     }])
     
     updated_df = pd.concat([df, new_row], ignore_index=True)
     conn.update(worksheet="Submissions", data=updated_df)
 
 def update_timeline_event(event_name, new_date_str):
-    """Updates the official timeline when Arbitrator approves"""
+    """Updates the official timeline dynamically"""
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read(worksheet="Timeline", ttl=0)
     
-    # Update the date for the specific event
-    if event_name in df['event'].values:
-        df.loc[df['event'] == event_name, 'date'] = new_date_str
-        df.loc[df['event'] == event_name, 'status'] = 'Rescheduled'
+    # Precise Match Update
+    mask = df['event'] == event_name
+    if mask.any():
+        df.loc[mask, 'date'] = new_date_str
+        df.loc[mask, 'status'] = 'Rescheduled' # Mark as changed
         conn.update(worksheet="Timeline", data=df)
         return True
     return False
 
 def update_submission_status(index, new_status):
-    """Marks a submission as Approved or Rejected"""
     conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read(worksheet="Submissions", ttl=0)
+    df = get_submissions()
     df.at[index, 'status'] = new_status
     conn.update(worksheet="Submissions", data=df)
 
-# 3. ALGORITHMS
-def calculate_cost_impact(days_delayed):
-    """
-    Estimates financial cost of delay.
-    Burn Rate = Arbitrator Fees + Counsel Fees x2 + Admin Costs
-    Estimated: $15,000 per day active.
-    """
-    return days_delayed * 15000
+# --- VISUALIZATION ENGINE ---
+def render_timeline(df):
+    df['date'] = pd.to_datetime(df['date'])
+    # Make bars 10 days wide visually so they are easy to click/see
+    df['finish'] = df['date'] + timedelta(days=10)
+    
+    # Sort by date so the earliest is at the top
+    df = df.sort_values(by="date", ascending=False)
 
-# --- MAIN UI ---
+    # Professional Legal Color Palette
+    color_map = {
+        "Tribunal": "#2C3E50",    # Navy Blue
+        "Claimant": "#E74C3C",    # Red
+        "Respondent": "#F39C12",  # Orange
+        "All": "#7F8C8D"          # Gray
+    }
+
+    fig = px.timeline(
+        df, 
+        x_start="date", 
+        x_end="finish", 
+        y="event", 
+        color="owner",
+        title=None,
+        color_discrete_map=color_map,
+        hover_data={"date": "|%B %d, %Y", "finish": False} # Format hover date
+    )
+
+    # Add "Today" Line
+    today = datetime.now().strftime("%Y-%m-%d")
+    fig.add_vline(x=today, line_width=2, line_dash="dot", line_color="green", annotation_text="Today")
+
+    # Clean "Přehledný" Layout
+    fig.update_layout(
+        xaxis_title="",
+        yaxis_title="",
+        legend_title="Responsible Party",
+        height=400,
+        margin=dict(l=0, r=0, t=30, b=0),
+        plot_bgcolor="white",
+        font=dict(family="Arial", size=12)
+    )
+    
+    # Add borders to grid
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#eee')
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+# --- MAIN APP ---
 st.title("📅 Smart Procedural Timeline")
-st.caption(f"Logged in as: {st.session_state['user_role'].upper()}")
 
-# --- 1. THE GANTT CHART (Visible to Everyone) ---
+# 1. LOAD DATA
 df_timeline = get_timeline()
-df_timeline['date'] = pd.to_datetime(df_timeline['date'])
-# Create a 'finish' date for visual width (events take 3 days visually)
-df_timeline['finish'] = df_timeline['date'] + timedelta(days=3)
 
-# Color coding
-colors = {"Tribunal": "#0f2e52", "Claimant": "#ff4b4b", "Respondent": "#FFA500", "All": "#808080"}
+# 2. VISUALIZATION (Split View)
+# We give the Chart and the Table equal weight for clarity
+tab_viz, tab_data = st.tabs(["📊 Gantt Chart", "📋 List View"])
 
-fig = px.timeline(
-    df_timeline, 
-    x_start="date", 
-    x_end="finish", 
-    y="event", 
-    color="owner",
-    title="Official Case Schedule",
-    color_discrete_map=colors
-)
-fig.update_yaxes(autorange="reversed") # Earliest events at top
-st.plotly_chart(fig, use_container_width=True)
+with tab_viz:
+    render_timeline(df_timeline)
+
+with tab_data:
+    # A clean, readable table sorted by date
+    st.caption("Official Procedural Order No. 1 Schedule")
+    display_df = df_timeline[['date', 'event', 'owner', 'status']].sort_values(by='date')
+    st.dataframe(
+        display_df, 
+        use_container_width=True,
+        column_config={
+            "date": st.column_config.DateColumn("Deadline", format="DD MMM YYYY"),
+            "event": "Procedural Step",
+            "owner": "Party",
+            "status": "Status"
+        },
+        hide_index=True
+    )
 
 st.divider()
 
-# --- 2. ROLE-BASED INTERFACE ---
+# --- 3. INTERACTION AREA ---
 
-# === SCENE A: ARBITRATOR VIEW (The Control Center) ===
 if st.session_state['user_role'] == 'arbitrator':
-    st.subheader("📥 Tribunal Inbox (Pending Requests)")
+    st.subheader("📥 Tribunal Action Required")
     
     subs_df = get_submissions()
     
-    # Filter for only Pending items
-    if not subs_df.empty and 'status' in subs_df.columns:
-        pending_subs = subs_df[subs_df['status'] == 'Pending']
+    if not subs_df.empty:
+        pending = subs_df[subs_df['status'] == 'Pending']
     else:
-        pending_subs = pd.DataFrame()
-    
-    if pending_subs.empty:
-        st.info("✅ No pending requests. The timeline is up to date.")
-    else:
-        st.write(f"You have {len(pending_subs)} pending procedural request(s).")
+        pending = pd.DataFrame()
         
-        for index, row in pending_subs.iterrows():
+    if pending.empty:
+        st.success("✅ All requests processed. No pending actions.")
+    else:
+        for index, row in pending.iterrows():
             with st.container(border=True):
-                c1, c2, c3 = st.columns([2, 1, 1])
-                
+                c1, c2 = st.columns([3, 1])
                 with c1:
-                    st.markdown(f"**Request from {row['party']}**")
-                    st.write(f"📝 {row['summary']}")
-                    # Parse dates to calculate impact
-                    try:
-                        new_date_obj = pd.to_datetime(row['proposed_date'])
-                        st.write(f"📅 Proposed Date: **{row['proposed_date']}**")
-                    except:
-                        st.error("Invalid date format in request.")
+                    st.markdown(f"**{row['doc_type']}** from {row['party']}")
+                    st.caption(f"Reason: {row['summary']}")
+                    st.markdown(f"➡️ Move **'{row['target_event']}'** to **{row['proposed_date']}**")
                 
                 with c2:
-                    # Smart Analysis
-                    st.caption("🤖 AI Impact Analysis")
-                    st.warning("⚠️ High Cost Impact")
-                    st.markdown("**Estimated Cost: $225,000**")
-                
-                with c3:
-                    st.write("Action:")
-                    if st.button("✅ Approve", key=f"app_{index}"):
-                        # 1. Update the Main Timeline
-                        # We infer the event from the summary or assume it's the next upcoming event for demo
-                        target_event = "Statement of Defence" # Default for demo
-                        update_timeline_event(target_event, row['proposed_date'])
-                        
-                        # 2. Mark submission as done
+                    if st.button("Approve", key=f"app_{index}", type="primary"):
+                        # FIX: Use the actual target_event from the row
+                        update_timeline_event(row['target_event'], row['proposed_date'])
                         update_submission_status(index, "Approved")
-                        st.success("Approved! Timeline updated.")
                         st.rerun()
                         
-                    if st.button("❌ Reject", key=f"rej_{index}"):
+                    if st.button("Reject", key=f"rej_{index}"):
                         update_submission_status(index, "Rejected")
                         st.rerun()
 
-# === SCENE B: PARTY VIEW (The Request Portal) ===
 else:
-    st.subheader(f"📤 {st.session_state['user_role'].capitalize()} Request Portal")
+    st.subheader("📤 Request Extension")
     
     with st.form("request_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### 1. Procedural Details")
-            # Dropdown ensures exact event matching
-            target_event = st.selectbox(
-                "Which event do you want to move?", 
-                df_timeline['event'].unique()
-            )
+        c1, c2 = st.columns(2)
+        with c1:
+            # Dropdown selects the EXACT event name from DB
+            target = st.selectbox("Event to Reschedule", df_timeline['event'].unique())
+            new_date = st.date_input("Proposed Date")
+        with c2:
+            reason = st.text_area("Reason for Delay", placeholder="Ex: Expert witness unavailable...")
             
-            # Calendar picker ensures exact date format YYYY-MM-DD
-            new_date = st.date_input("Proposed New Date")
-            
-        with col2:
-            st.markdown("#### 2. Formal Request")
-            # We still allow the file upload for the legal record
-            uploaded_file = st.file_uploader("Attach Formal Letter (PDF)", type="pdf")
-            
-            summary_text = st.text_area(
-                "Brief Summary for Tribunal", 
-                placeholder="e.g. 'We request a 14-day extension due to unavailability of expert witness.'"
-            )
-
-        # Smart "Cost of Delay" Calculation (Visual Feedback)
-        st.info(f"ℹ️ Note: This request will trigger an automated notification to the Tribunal.")
-
-        submitted = st.form_submit_button("🚀 Submit Request")
-        
-        if submitted:
-            # 1. Save to Database
+        if st.form_submit_button("🚀 Submit Request"):
             add_submission(
                 party=st.session_state['user_role'],
-                doc_type="Extension Request", 
-                summary=f"Request to move {target_event}. {summary_text}",
-                proposed_date=str(new_date)
+                doc_type="Extension Request",
+                summary=reason,
+                proposed_date=str(new_date),
+                target_event=target  # SAVING THE EXACT EVENT NAME
             )
-            
-            st.success("✅ Request Sent! The Tribunal has been notified.")
-            st.balloons()
+            st.success("Request submitted to Tribunal.")
