@@ -14,8 +14,11 @@ def get_db_connection():
 def fetch_users():
     """Reads the 'Users' worksheet. ttl=0 means don't cache, always get fresh data."""
     conn = get_db_connection()
+    # HARDCODED URL TO ENSURE STABILITY
+    SHEET_URL = "https://docs.google.com/spreadsheets/d/1wA5QlIIy5vslUZYYJTTx5Aq-jga71_3-zzNerXj30bA/edit?usp=sharing"
+    
     try:
-        df = conn.read(worksheet="Users", ttl=0)
+        df = conn.read(spreadsheet=SHEET_URL, worksheet="Users", ttl=0)
         # Ensure required columns exist even if sheet is empty
         expected_cols = ["username", "name", "password", "role"]
         if df.empty or not all(col in df.columns for col in expected_cols):
@@ -30,6 +33,7 @@ def create_user(username, name, password, role):
     """Adds a new user to the Google Sheet."""
     conn = get_db_connection()
     df = fetch_users()
+    SHEET_URL = "https://docs.google.com/spreadsheets/d/1wA5QlIIy5vslUZYYJTTx5Aq-jga71_3-zzNerXj30bA/edit?usp=sharing"
     
     # Check if username exists
     if not df.empty and username in df['username'].values:
@@ -47,7 +51,7 @@ def create_user(username, name, password, role):
     updated_df = pd.concat([df, new_user], ignore_index=True)
     
     # Update Google Sheet
-    conn.update(worksheet="Users", data=updated_df)
+    conn.update(spreadsheet=SHEET_URL, worksheet="Users", data=updated_df)
     return True
 
 def verify_user(username, password):
@@ -122,15 +126,6 @@ else:
 
     # LOGIN TAB
     with tab1:
-        # --- 🕵️ DEBUGGING SECTION START ---
-        st.caption("🔍 DEBUG MODE: This is what the app sees in your database:")
-        try:
-            debug_data = fetch_users()
-            st.dataframe(debug_data)
-        except Exception as e:
-            st.error(f"Cannot read database: {e}")
-        # --- DEBUGGING SECTION END ---
-
         st.write("Please sign in to access the case files.")
         with st.form("login_form"):
             username = st.text_input("Username")
