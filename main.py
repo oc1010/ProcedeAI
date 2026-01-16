@@ -3,25 +3,31 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import time
 
-# --- CONFIGURATION ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(page_title="ArbOS Login", layout="centered")
 
-# --- DATABASE FUNCTIONS (REAL) ---
+# --- 2. DATABASE FUNCTIONS (REAL) ---
 def get_db_connection():
-    # Establishes the connection using the secrets you just set up
+    """Establishes the connection using the secrets you just set up."""
     return st.connection("gsheets", type=GSheetsConnection)
 
 def fetch_users():
+    """Reads the 'Users' worksheet. ttl=0 means don't cache, always get fresh data."""
     conn = get_db_connection()
-    # Read the 'Users' worksheet. ttl=0 means "don't cache, always get fresh data"
     try:
         df = conn.read(worksheet="Users", ttl=0)
+        # Ensure required columns exist even if sheet is empty
+        expected_cols = ["username", "name", "password", "role"]
+        if df.empty or not all(col in df.columns for col in expected_cols):
+             return pd.DataFrame(columns=expected_cols)
         return df
-    except Exception:
-        # If the sheet is empty or fails, return an empty dataframe structure
+    except Exception as e:
+        # Fallback if the sheet is completely new/empty or connection fails
+        st.error(f"Database Error: {e}")
         return pd.DataFrame(columns=["username", "name", "password", "role"])
 
 def create_user(username, name, password, role):
+    """Adds a new user to the Google Sheet."""
     conn = get_db_connection()
     df = fetch_users()
     
@@ -33,7 +39,7 @@ def create_user(username, name, password, role):
     new_user = pd.DataFrame([{
         "username": username,
         "name": name,
-        "password": password, # In production, HASH this!
+        "password": password, 
         "role": role
     }])
     
@@ -45,24 +51,25 @@ def create_user(username, name, password, role):
     return True
 
 def verify_user(username, password):
+    """Checks credentials against the Google Sheet."""
     df = fetch_users()
     if df.empty:
         return None
         
     # Filter for the username
-    user_row = df[df['username'] == username]
+    # We convert to string to ensure '123' (int) matches '123' (str)
+    df['username'] = df['username'].astype(str)
+    df['password'] = df['password'].astype(str)
+    
+    user_row = df[df['username'] == str(username)]
     
     if not user_row.empty:
         stored_password = user_row.iloc[0]['password']
-        # Convert both to string to be safe
         if str(stored_password) == str(password):
             return user_row.iloc[0] # Return the user data
     return None
 
-# --- UI LAYOUT ---
-st.title("⚖️ ArbOS: Secure Access")
-
-# Initialize Session State
+# --- 3. UI: INITIALIZE SESSION STATE ---
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 if 'user_role' not in st.session_state:
@@ -70,11 +77,12 @@ if 'user_role' not in st.session_state:
 if 'user_name' not in st.session_state:
     st.session_state['user_name'] = ""
 
-# --- LOGGED IN VIEW ---
+# --- 4. VIEW: LOGGED IN ---
 if st.session_state['logged_in']:
+    st.title("⚖️ ArbOS: Tribunal Dashboard")
     st.success(f"Welcome back, {st.session_state['user_name']}!")
     
-    # Sidebar Info
+    # Sidebar Info & Logout
     with st.sidebar:
         st.write(f"Logged in as: **{str(st.session_state['user_role']).upper()}**")
         if st.button("Logout"):
@@ -82,39 +90,47 @@ if st.session_state['logged_in']:
             st.session_state['user_role'] = None
             st.rerun()
 
-    # ROUTING: Show different screens based on Role
     st.divider()
     
+    # ROUTING: Show different screens based on Role
     if st.session_state['user_role'] == 'arbitrator':
         st.info("ACCESS LEVEL: TRIBUNAL (Full Control)")
-        st.markdown("### 🛠️ Tribunal Dashboard")
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("#### 📝 Drafting")
-            st.write("Generate procedural orders.")
+            st.markdown("### 📝 Drafting")
+            st.write("Generate procedural orders using AI.")
             st.page_link("pages/1_Drafting_PO1.py", label="Open Drafting Engine", icon="⚖️")
             
         with col2:
-            st.markdown("#### 📅 Timeline")
+            st.markdown("### 📅 Timeline")
             st.write("Manage deadlines and extensions.")
-            # Note: We will build this page next!
-            st.button("Manage Timeline (Coming Soon)", disabled=True)
+            st.page_link("pages/2_Smart_Timeline.py", label="Manage Timeline", icon="📅")
 
     else:
+        # View for Claimants / Respondents
         st.warning(f"ACCESS LEVEL: PARTY ({str(st.session_state['user_role']).upper()})")
         st.write("You have read-only access to official orders. You may request timeline extensions below.")
         
-        st.markdown("#### 📅 Case Status")
-        # Note: We will build this page next!
-        st.button("View Timeline (Coming Soon)", disabled=True)
+        st.markdown("### 📅 Case Status")
+        st.page_link("pages/2_Smart_Timeline.py", label="View Timeline", icon="📅")
 
-# --- LOGIN / SIGNUP VIEW ---
+# --- 5. VIEW: LOGIN / SIGNUP ---
 else:
+    st.title("⚖️ ArbOS: Secure Access")
     tab1, tab2 = st.tabs(["🔒 Login", "✍️ Sign Up"])
 
     # LOGIN TAB
     with tab1:
+        # --- 🕵️ DEBUGGING SECTION START ---
+        st.caption("🔍 DEBUG MODE: This is what the app sees in your database:")
+        try:
+            debug_data = fetch_users()
+            st.dataframe(debug_data)
+        except Exception as e:
+            st.error(f"Cannot read database: {e}")
+        # --- DEBUGGING SECTION END ---
+
         st.write("Please sign in to access the case files.")
         with st.form("login_form"):
             username = st.text_input("Username")
@@ -145,7 +161,6 @@ else:
             new_name = st.text_input("Full Name (e.g. 'Counsel for Claimant')")
             new_pass = st.text_input("Choose a Password", type="password")
             new_role = st.selectbox("I am a...", ["claimant", "respondent", "arbitrator"]) 
-            # Added 'arbitrator' here for your testing, but usually we hide it!
             
             submit_signup = st.form_submit_button("Create Account")
             
