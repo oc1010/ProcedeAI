@@ -145,9 +145,7 @@ if st.session_state['user_role'] == 'arbitrator':
                     st.write("Action:")
                     if st.button("✅ Approve", key=f"app_{index}"):
                         # 1. Update the Main Timeline
-                        # (We infer the event from the summary or assume it's the next upcoming event for demo)
-                        # For the hackathon, we'll try to match the event name if it exists in the summary, 
-                        # otherwise we simulate updating 'Statement of Defence' as a default demo action.
+                        # We infer the event from the summary or assume it's the next upcoming event for demo
                         target_event = "Statement of Defence" # Default for demo
                         update_timeline_event(target_event, row['proposed_date'])
                         
@@ -199,4 +197,8 @@ else:
                 party=st.session_state['user_role'],
                 doc_type="Extension Request", 
                 summary=f"Request to move {target_event}. {summary_text}",
-                proposed_date=str(new_date
+                proposed_date=str(new_date)
+            )
+            
+            st.success("✅ Request Sent! The Tribunal has been notified.")
+            st.balloons()
