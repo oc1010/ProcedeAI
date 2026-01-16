@@ -6,8 +6,21 @@ import os
 from groq import Groq
 import json
 
-# 1. Setup
+# 1. Page Config (Must be the first Streamlit command)
 st.set_page_config(page_title="ArbOS: PO1 Generator", layout="wide")
+
+# --- 🔒 THE BOUNCER (SECURITY CHECK) ---
+# Initialize user_role if it doesn't exist (e.g., if they skipped the login page)
+if 'user_role' not in st.session_state:
+    st.session_state['user_role'] = None
+
+# Check ID Card
+if st.session_state['user_role'] != 'arbitrator':
+    st.error("⛔ ACCESS DENIED: This tool is restricted to the Tribunal.")
+    st.info("Please log in as an Arbitrator to access the Drafting Engine.")
+    st.stop()  # <--- Hails the script here. No code below this line runs.
+# ---------------------------------------
+
 st.title("ArbOS: PO1 Generator")
 st.caption("The Librarian Mode: Extracting complex data from your report.")
 
@@ -93,9 +106,7 @@ with st.form("drafting_form"):
 # 6. The Printer (Docxtpl)
 if submitted:
     try:
-        # NOTE: This assumes 'template_po1.docx' is in the MAIN folder (parent directory)
-        # We use '../' to go up one level if the file is in 'pages', OR we just use absolute path.
-        # Simplest fix for Streamlit Cloud: Put template in main folder, reference by name.
+        # Load the template (looking in the main folder)
         doc = DocxTemplate("template_po1.docx")
         
         context = {

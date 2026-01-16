@@ -1,0 +1,8 @@
+[theme]
+primaryColor = "#0f2e52"   # Navy Blue (ArbOS Brand)
+backgroundColor = "#ffffff" # Clean White
+secondaryBackgroundColor = "#f0f2f6" # Light Grey sidebar
+textColor = "#262730"
+font = "sans serif"
+[client]
+showSidebarNavigation = false
